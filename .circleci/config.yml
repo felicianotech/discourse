@@ -1,0 +1,68 @@
+workflows:
+  version: 2
+  main:
+    jobs:
+      - build-ruby25
+
+version: 2
+jobs:
+  build-ruby25:
+    docker:
+      - image: circleci/ruby:2.5.0-node-browsers
+      - image: circleci/postgres:9.6
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ""
+      - image: redis:4.0.6
+    environment:
+      DISCOURSE_HOSTNAME: www.example.com
+      RUBY_GC_MALLOC_LIMIT: 50000000
+      RAILS_MASTER: 0
+      QUNIT_RUN: 0
+      RUN_LINT: 0
+      PGHOST: localhost
+      PGUSER: postgres
+      RAILS_ENV: test
+    steps:
+      - checkout
+      - run:
+          name: "Install APT packages"
+          command: sudo apt-get install -y gifsicle jpegoptim optipng jhead postgresql-client ghostscript
+      - run:
+          name: "Before Install"
+          command: |
+            git clone --depth=1 https://github.com/discourse/discourse-backup-uploads-to-s3.git plugins/discourse-backup-uploads-to-s3
+            git clone --depth=1 https://github.com/discourse/discourse-spoiler-alert.git plugins/discourse-spoiler-alert
+            git clone --depth=1 https://github.com/discourse/discourse-cakeday.git plugins/discourse-cakeday
+            git clone --depth=1 https://github.com/discourse/discourse-canned-replies.git plugins/discourse-canned-replies
+            git clone --depth=1 https://github.com/discourse/discourse-chat-integration.git plugins/discourse-chat-integration
+            git clone --depth=1 https://github.com/discourse/discourse-assign.git plugins/discourse-assign
+            git clone --depth=1 https://github.com/discourse/discourse-patreon.git plugins/discourse-patreon
+            git clone --depth=1 https://github.com/discourse/discourse-staff-notes.git plugins/discourse-staff-notes
+            psql -d template1 -c 'create extension hstore;'
+      - run:
+          name: "Install"
+          command: |
+            bash -c "if [ '$RAILS_MASTER' == '1' ]; then bundle update --retry=3 --jobs=3 arel rails seed-fu; fi"
+            bash -c "if [ '$RAILS_MASTER' == '0' ]; then bundle install --without development --deployment --retry=3 --jobs=3; fi"
+            bash -c "if [ '$RUN_LINT' == '1' ]; then yarn global add eslint babel-eslint; fi"
+            bash -c "if [ '$QUNIT_RUN' == '1' ]; then yarn install --dev; fi"
+      - run:
+          name: "Script"
+          command: |
+            if [ '$RUN_LINT' == '1' ]; then
+              bundle exec rubocop --parallel && \
+              eslint --ext .es6 app/assets/javascripts && \
+              eslint --ext .es6 test/javascripts && \
+              eslint --ext .es6 plugins/**/assets/javascripts && \
+              eslint --ext .es6 plugins/**/test/javascripts && \
+              eslint app/assets/javascripts test/javascripts
+            else
+              bundle exec rake db:create db:migrate
+              if [ '$QUNIT_RUN' == '1' ]; then
+                bundle exec rake qunit:test['500000'] && \
+                bundle exec rake plugin:qunit
+              else
+                bundle exec rspec && bundle exec rake plugin:spec
+              fi
+            fi
