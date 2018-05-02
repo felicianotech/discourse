@@ -40,6 +40,10 @@ jobs:
             git clone --depth=1 https://github.com/discourse/discourse-patreon.git plugins/discourse-patreon
             git clone --depth=1 https://github.com/discourse/discourse-staff-notes.git plugins/discourse-staff-notes
             psql -d template1 -c 'create extension hstore;'
+      - restore_cache:
+          keys:
+            - gem-cache-v1-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
+            - gem-cache-v1-{{ .Branch }}
       - run:
           name: "Install"
           command: |
@@ -47,6 +51,10 @@ jobs:
             bash -c "if [ '$RAILS_MASTER' == '0' ]; then bundle install --without development --deployment --retry=3 --jobs=3; fi"
             bash -c "if [ '$RUN_LINT' == '1' ]; then yarn global add eslint babel-eslint; fi"
             bash -c "if [ '$QUNIT_RUN' == '1' ]; then yarn install --dev; fi"
+      - save_cache:
+          key: gem-cache-v1-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
+          paths:
+            - vendor/bundle
       - run:
           name: "Script"
           command: |
